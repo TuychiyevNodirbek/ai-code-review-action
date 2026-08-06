@@ -1,0 +1,49 @@
+name: "AI Code Review"
+description: "RAG-ассистированное ревью pull request'ов через LLM (Groq/Gemini/OpenRouter с фолбэком)"
+author: "TuychiyevNodirbek"
+
+inputs:
+  api-url:
+    description: "URL вашего Review API сервиса (см. https://github.com/TuychiyevNodirbek/llm-code-review)"
+    required: true
+  api-token:
+    description: "API-токен вашего сервиса (REVIEW_API_TOKEN)"
+    required: true
+  github-token:
+    description: "Токен для постинга комментариев в PR"
+    required: true
+    default: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get PR diff
+      shell: bash
+      run: |
+        git fetch origin ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+        git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > "${{ github.action_path }}/pr.diff"
+
+    - name: Send to Review API
+      shell: bash
+      env:
+        API_URL: ${{ inputs.api-url }}
+        API_TOKEN: ${{ inputs.api-token }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        DIFF_CONTENT=$(python3 -c "import json,sys; print(json.dumps(open('${{ github.action_path }}/pr.diff').read()))")
+        curl -sS -X POST "$API_URL/review" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $API_TOKEN" \
+          -d "{
+            \"repo\": \"${{ github.repository }}\",
+            \"pr_number\": ${{ github.event.pull_request.number }},
+            \"base_sha\": \"${{ github.event.pull_request.base.sha }}\",
+            \"head_sha\": \"${{ github.event.pull_request.head.sha }}\",
+            \"diff\": $DIFF_CONTENT,
+            \"installation_token\": \"$GH_TOKEN\"
+          }" \
+          --fail-with-body
+
+branding:
+  icon: "check-circle"
+  color: "purple"
