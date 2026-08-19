@@ -29,19 +29,35 @@ runs:
         API_URL: ${{ inputs.api-url }}
         API_TOKEN: ${{ inputs.api-token }}
         GH_TOKEN: ${{ inputs.github-token }}
+        PR_REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        DIFF_PATH: ${{ github.action_path }}/pr.diff
+        REQUEST_PATH: ${{ github.action_path }}/request.json
       run: |
-        DIFF_CONTENT=$(python3 -c "import json,sys; print(json.dumps(open('${{ github.action_path }}/pr.diff').read()))")
+        # Собираем JSON-тело в файл, а не в аргумент командной строки —
+        # на больших PR (много изменённого кода) diff не помещается в
+        # ARG_MAX, и curl падает с "Argument list too long".
+        python3 -c "
+        import json, os
+        with open(os.environ['DIFF_PATH']) as f:
+            diff = f.read()
+        payload = {
+            'repo': os.environ['PR_REPO'],
+            'pr_number': int(os.environ['PR_NUMBER']),
+            'base_sha': os.environ['BASE_SHA'],
+            'head_sha': os.environ['HEAD_SHA'],
+            'diff': diff,
+            'installation_token': os.environ['GH_TOKEN'],
+        }
+        with open(os.environ['REQUEST_PATH'], 'w') as f:
+            json.dump(payload, f)
+        "
         curl -sS -X POST "$API_URL/review" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer $API_TOKEN" \
-          -d "{
-            \"repo\": \"${{ github.repository }}\",
-            \"pr_number\": ${{ github.event.pull_request.number }},
-            \"base_sha\": \"${{ github.event.pull_request.base.sha }}\",
-            \"head_sha\": \"${{ github.event.pull_request.head.sha }}\",
-            \"diff\": $DIFF_CONTENT,
-            \"installation_token\": \"$GH_TOKEN\"
-          }" \
+          --data @"$REQUEST_PATH" \
           --fail-with-body
 
 branding:
